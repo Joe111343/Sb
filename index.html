@@ -28,11 +28,11 @@
 
 <div class="panel">
   <div>你的 ID：<span id="my-id">產生中...</span> <button onclick="copyId()">複製</button></div>
-  <div>狀態：<span id="status">等待中...</span></div>
+  <div>狀態：<span id="status">未連線</span></div>
   <div>頭像：<input type="file" id="avatarInput" accept="image/*"></div>
 </div>
 
-<div class="panel" id="manualConnect" style="display:none;">
+<div class="panel" id="manualConnect">
   <input id="peer-id" placeholder="輸入對方 ID">
   <button onclick="connect()">連線</button>
 </div>
@@ -40,10 +40,10 @@
 <div id="chat"></div>
 
 <div id="input-area">
-  <input id="msg" placeholder="輸入訊息..." />
-  <button onclick="sendMsg()">傳送</button>
-  <button onclick="startRecording()">🎙️</button>
-  <button onclick="stopRecording()">⏹️</button>
+  <input id="msg" placeholder="輸入訊息..." disabled />
+  <button onclick="sendMsg()" disabled>傳送</button>
+  <button onclick="startRecording()" disabled>🎙️</button>
+  <button onclick="stopRecording()" disabled>⏹️</button>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
@@ -64,8 +64,6 @@ const $ = id => document.getElementById(id);
 
 peer.on('open', id => {
   $("my-id").textContent = id;
-  $("status").textContent = "等待自動連線中...";
-  tryJoinRoom();
 });
 
 peer.on("connection", c => {
@@ -73,34 +71,36 @@ peer.on("connection", c => {
   setupConn();
 });
 
-function tryJoinRoom() {
-  $("status").textContent = "嘗試自動連線到房間...";
-  const c = peer.connect(ROOM_ID);
-  c.on("open", () => {
-    conn = c;
-    setupConn();
-  });
-  c.on("error", () => {
-    $("status").textContent = "自動連線失敗，請手動輸入對方ID";
-    $("manualConnect").style.display = "block";
-  });
-}
-
 function connect() {
   const id = $("peer-id").value.trim();
-  if (!id) return;
-  const c = peer.connect(id);
-  c.on("open", () => {
-    conn = c;
+  if (!id) return alert("請輸入對方ID");
+  if (conn && conn.open) conn.close();
+  conn = peer.connect(id);
+  conn.on("open", () => {
     setupConn();
+  });
+  conn.on("error", err => {
+    alert("連線錯誤：" + err);
   });
 }
 
 function setupConn() {
   $("status").textContent = "已連線: " + conn.peer;
+  enableChat(true);
   if (localAvatar) send({ type: "avatar", data: localAvatar });
   conn.on("data", handleData);
-  conn.on("close", () => $("status").textContent = "連線已中斷");
+  conn.on("close", () => {
+    $("status").textContent = "連線已中斷";
+    enableChat(false);
+  });
+}
+
+function enableChat(enabled) {
+  $("msg").disabled = !enabled;
+  $("msg").focus();
+  document.querySelector("#input-area button[onclick='sendMsg()']").disabled = !enabled;
+  document.querySelector("#input-area button[onclick='startRecording()']").disabled = !enabled;
+  document.querySelector("#input-area button[onclick='stopRecording()']").disabled = !enabled;
 }
 
 $("avatarInput").addEventListener("change", e => {
