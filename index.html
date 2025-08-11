@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-<meta charset="UTF-8">
+<meta charset="UTF-8" />
 <title>桃信 Momo Talk</title>
 <style>
   body { font-family: "Segoe UI","Microsoft JhengHei",sans-serif; margin:0; background:#fffafc; display:flex; flex-direction:column; height:100vh; }
@@ -48,8 +48,13 @@
 
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <script>
-const ROOM_ID = "1234"; // 固定4位數字短ID
-const peer = new Peer();
+function randomRoomId() {
+  return Math.floor(Math.random() * 9000 + 1000).toString(); // 1000~9999
+}
+
+const ROOM_ID = randomRoomId();
+const peer = new Peer(ROOM_ID);
+
 let conn = null;
 let mediaRecorder, chunks = [];
 let localAvatar = 'https://via.placeholder.com/40?text=我';
@@ -59,12 +64,8 @@ const $ = id => document.getElementById(id);
 
 peer.on('open', id => {
   $("my-id").textContent = id;
-  // 自動連線
-  if (id !== ROOM_ID) {
-    tryJoinRoom();
-  } else {
-    $("status").textContent = "等待對方進入...";
-  }
+  $("status").textContent = "等待自動連線中...";
+  tryJoinRoom();
 });
 
 peer.on("connection", c => {
@@ -124,7 +125,6 @@ function sendMsg() {
 }
 
 function formatMsg(text) {
-  // URL轉成超連結，圖片網址顯示圖片
   const urlPattern = /(https?:\/\/[^\s]+)/g;
   return text.replace(urlPattern, url => {
     if (/\.(jpg|jpeg|png|gif|webp)$/i.test(url)) {
