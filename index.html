@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-<meta charset="UTF-8">
-<title>桃信 Momo Talk 自動連接</title>
+<meta charset="UTF-8" />
+<title>桃信 Momo Talk 自動+手動連線</title>
 <style>
   body { font-family:"Segoe UI","Microsoft JhengHei",sans-serif; margin:0; background:linear-gradient(to bottom,#ffeef3,#fff); display:flex; flex-direction:column; height:100vh; }
   header { background:#ff5a7e; color:white; padding:1em; text-align:center; font-weight:bold; font-size:1.3em; letter-spacing:1px; box-shadow:0 2px 4px #e47; }
@@ -21,21 +21,30 @@
   #msg { flex:1; padding:0.5em; border-radius:8px; border:1px solid #ccc; }
   button { padding:0.5em 1em; background:#ff5a7e; border:none; border-radius:6px; color:white; cursor:pointer; }
   button:hover { background:#e04868; }
+  #manual-connect { margin-top:1em; }
+  #status { margin-left:1em; font-weight:bold; }
 </style>
 </head>
 <body>
 
-<header>Momo+Talk</header>
+<header>🍑 桃信 Momo Talk</header>
 
 <div class="panel">
   <label>我的 ID：</label><span id="my-id">連線中...</span>
-  <label style="margin-left:1em;">頭像：</label><input type="file" id="avatarInput" accept="image/*">
+  <label style="margin-left:1em;">頭像：</label><input type="file" id="avatarInput" accept="image/*" />
+</div>
+
+<div class="panel" id="manual-connect" style="display:none;">
+  <label>輸入對方 ID：</label>
+  <input id="peer-id" placeholder="請輸入對方ID" />
+  <button onclick="manualConnect()">手動連線</button>
+  <span id="status"></span>
 </div>
 
 <div id="chat"></div>
 
 <div id="input-area">
-  <input id="msg" placeholder="輸入訊息或貼上連結/圖片網址...">
+  <input id="msg" placeholder="輸入訊息或貼上連結/圖片網址..." />
   <button onclick="sendMsg()">傳送</button>
   <button onclick="startRecording()">🎙️</button>
   <button onclick="stopRecording()">⏹️</button>
@@ -43,14 +52,13 @@
 
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <script>
-const ROOM_ID = "R3D"; // 固定短ID
+const ROOM_ID = "1234";
 const $ = id => document.getElementById(id);
 
 let peer, conn;
 let localAvatar = "", remoteAvatar = "";
 let mediaRecorder, chunks = [];
 
-// 建立Peer
 function initPeer() {
   peer = new Peer(ROOM_ID, {
     debug: 2,
@@ -59,18 +67,18 @@ function initPeer() {
 
   peer.on("open", id => {
     $("my-id").textContent = id;
-    console.log("Peer已啟動:", id);
+    tryAutoConnect();
   });
 
   peer.on("error", err => {
     console.warn("Peer錯誤:", err);
-    // 如果房間ID被占用，改用隨機ID並連線到ROOM_ID
     if (err.type === "unavailable-id") {
-      peer = new Peer(null); // 自動生成ID
+      // 房間ID被用，改成自動生成ID，改成手動連線
+      peer = new Peer();
       peer.on("open", id => {
         $("my-id").textContent = id;
-        conn = peer.connect(ROOM_ID);
-        setupConn();
+        $("manual-connect").style.display = "block";
+        $("status").textContent = "請輸入對方ID手動連線";
       });
     }
   });
@@ -81,16 +89,58 @@ function initPeer() {
   });
 }
 
-// 連線處理
+function tryAutoConnect() {
+  // 嘗試連線到 ROOM_ID 除非自己就是ROOM_ID
+  if (peer.id === ROOM_ID) {
+    // 房主，等人連線
+    $("manual-connect").style.display = "none";
+    $("status").textContent = "等待對方連線...";
+  } else {
+    // 嘗試連線到 ROOM_ID
+    conn = peer.connect(ROOM_ID);
+    setupConn();
+    $("manual-connect").style.display = "none";
+    $("status").textContent = "嘗試自動連線到房主...";
+  }
+}
+
 function setupConn() {
   conn.on("open", () => {
     send({ type: "avatar", data: localAvatar });
-    console.log("已連線到", conn.peer);
+    $("status").textContent = "已連線: " + conn.peer;
   });
   conn.on("data", handleData);
+  conn.on("close", () => {
+    $("status").textContent = "連線已中斷";
+    conn = null;
+  });
+  conn.on("error", e => {
+    $("status").textContent = "連線錯誤: " + e;
+    conn = null;
+  });
 }
 
-// 處理接收資料
+function manualConnect() {
+  const id = $("peer-id").value.trim();
+  if (!id) return alert("請輸入對方 ID");
+  if (conn) conn.close();
+  conn = peer.connect(id);
+  setupConn();
+  $("status").textContent = "嘗試手動連線...";
+}
+
+function send(data) {
+  if (conn && conn.open) conn.send(data);
+}
+
+function sendMsg() {
+  const text = $("msg").value.trim();
+  if (!text) return;
+  send({ type: "text", data: text });
+  addMessage("me", formatMsg(text));
+  $("msg").value = "";
+}
+
 function handleData(data) {
   if (data.type === "text") {
     addMessage("you", formatMsg(data.data));
@@ -102,12 +152,6 @@ function handleData(data) {
   }
 }
 
-// 傳送資料
-function send(data) {
-  if (conn && conn.open) conn.send(data);
-}
-
-// 格式化訊息（支援連結與圖片）
 function formatMsg(text) {
   const urlRegex = /(https?:\/\/[^\s]+)/g;
   return text.replace(urlRegex, url => {
@@ -118,16 +162,6 @@ function formatMsg(text) {
   });
 }
 
-// 傳送文字
-function sendMsg() {
-  const text = $("msg").value.trim();
-  if (!text) return;
-  send({ type: "text", data: text });
-  addMessage("me", formatMsg(text));
-  $("msg").value = "";
-}
-
-// 新增訊息
 function addMessage(sender, html) {
   const msg = document.createElement("div");
   msg.className = `message ${sender}`;
@@ -138,7 +172,6 @@ function addMessage(sender, html) {
   $("chat").scrollTop = $("chat").scrollHeight;
 }
 
-// 新增音訊訊息
 function addAudio(sender, url) {
   const msg = document.createElement("div");
   msg.className = `message ${sender}`;
@@ -151,14 +184,12 @@ function addAudio(sender, url) {
   $("chat").scrollTop = $("chat").scrollHeight;
 }
 
-// 頭像上傳
 $("avatarInput").addEventListener("change", e => {
   const reader = new FileReader();
   reader.onload = () => { localAvatar = reader.result; };
   if (e.target.files[0]) reader.readAsDataURL(e.target.files[0]);
 });
 
-// 錄音
 async function startRecording() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -179,5 +210,6 @@ function stopRecording() { if (mediaRecorder) mediaRecorder.stop(); }
 
 initPeer();
 </script>
+
 </body>
 </html>
