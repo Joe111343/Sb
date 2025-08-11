@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <title>桃信 Momo Talk</title>
+  <style>
+    body {
+      font-family: "Segoe UI", "Microsoft JhengHei", sans-serif;
+      margin: 0;
+      background: linear-gradient(to bottom, #ffeef3, #ffffff);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    header {
+      background: #ff5a7e;
+      color: white;
+      padding: 1em;
+      text-align: center;
+      font-weight: bold;
+      font-size: 1.3em;
+      letter-spacing: 1px;
+      box-shadow: 0 2px 4px #e47;
+    }
+    .panel {
+      padding: 1em;
+      background: #fff;
+      border-radius: 12px;
+      margin: 1em;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    .panel label {
+      font-weight: bold;
+      margin-right: 0.5em;
+    }
+    #chat {
+      flex: 1;
+      padding: 1em;
+      overflow-y: auto;
+      background: #fffafc;
+      display: flex;
+      flex-direction: column;
+    }
+    .message {
+      display: flex;
+      align-items: flex-start;
+      margin: 0.6em 0;
+    }
+    .message img {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      border: 2px solid #ff8ca5;
+      margin-right: 0.5em;
+    }
+    .bubble {
+      max-width: 70%;
+      padding: 0.6em 1em;
+      border-radius: 1em;
+      word-break: break-word;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      position: relative;
+    }
+    .me {
+      flex-direction: row-reverse;
+    }
+    .me img {
+      margin-left: 0.5em;
+      margin-right: 0;
+    }
+    .me .bubble {
+      background: linear-gradient(to right, #ffbdd3, #ffdce7);
+      margin-left: auto;
+    }
+    .you .bubble {
+      background: #f1f1f1;
+    }
+    .audio-bubble {
+      display: inline-block;
+    }
+    #input-area {
+      display: flex;
+      padding: 1em;
+      border-top: 1px solid #ccc;
+      background: #fff0f5;
+    }
+    input, button {
+      font-size: 1em;
+    }
+    #msg {
+      flex: 1;
+      padding: 0.5em;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+    }
+    button {
+      padding: 0.5em 1em;
+      background-color: #ff5a7e;
+      border: none;
+      border-radius: 6px;
+      color: white;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #e04868;
+    }
+    input[type="file"] {
+      background: none;
+    }
+  </style>
+</head>
+<body>
+
+<header>🍑 桃信 Momo Talk</header>
+
+<div class="panel">
+  <label>你的 ID：</label><span id="my-id">產生中...</span>
+  <button onclick="copyId()">複製</button>
+  <label style="margin-left:1em;">頭像：</label><input type="file" id="avatarInput" accept="image/*" />
+</div>
+
+<div class="panel">
+  <label>對方 ID：</label>
+  <input id="peer-id" placeholder="輸入對方 ID">
+  <button onclick="connect()">連線</button>
+  <button onclick="startRecording()">🎙️ 錄音</button>
+  <button onclick="stopRecording()">⏹️ 停止</button>
+</div>
+
+<div id="chat"></div>
+
+<div id="input-area">
+  <input id="msg" placeholder="輸入訊息..." />
+  <button onclick="sendMsg()">傳送</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<script>
+  const peer = new Peer();
+  let conn = null;
+  let localAvatar = "";
+  let remoteAvatar = "";
+  let mediaRecorder, chunks = [];
+
+  const $ = id => document.getElementById(id);
+  peer.on('open', id => { $("my-id").textContent = id; });
+
+  $("avatarInput").addEventListener("change", e => {
+    const reader = new FileReader();
+    reader.onload = () => { localAvatar = reader.result; };
+    if (e.target.files[0]) reader.readAsDataURL(e.target.files[0]);
+  });
+
+  peer.on("connection", c => {
+    conn = c;
+    conn.on("data", handleData);
+    conn.on("open", () => {
+      send({ type: "avatar", data: localAvatar });
+    });
+  });
+
+  function connect() {
+    const id = $("peer-id").value.trim();
+    if (!id) return;
+    conn = peer.connect(id);
+    conn.on("data", handleData);
+    conn.on("open", () => {
+      send({ type: "avatar", data: localAvatar });
+    });
+  }
+
+  function send(data) {
+    if (conn && conn.open) conn.send(data);
+  }
+
+  function sendMsg() {
+    const text = $("msg").value.trim();
+    if (!text) return;
+    send({ type: "text", data: text });
+    addMessage("me", text);
+    $("msg").value = "";
+  }
+
+  function handleData(data) {
+    if (data.type === "text") {
+      addMessage("you", data.data);
+    } else if (data.type === "avatar") {
+      remoteAvatar = data.data;
+    } else if (data.type === "audio") {
+      const blob = new Blob([data.data], { type: 'audio/webm' });
+      const url = URL.createObjectURL(blob);
+      addAudio("you", url);
+    }
+  }
+
+  function addMessage(sender, text) {
+    const msg = document.createElement("div");
+    msg.className = `message ${sender}`;
+    msg.innerHTML = `
+      <img src="${sender === 'me' ? localAvatar : remoteAvatar || 'https://via.placeholder.com/40'}" />
+      <div class="bubble">${text}</div>`;
+    $("chat").appendChild(msg);
+    $("chat").scrollTop = $("chat").scrollHeight;
+  }
+
+  function addAudio(sender, url) {
+    const msg = document.createElement("div");
+    msg.className = `message ${sender}`;
+    msg.innerHTML = `
+      <img src="${sender === 'me' ? localAvatar : remoteAvatar || 'https://via.placeholder.com/40'}" />
+      <div class="bubble audio-bubble">
+        <audio controls src="${url}"></audio>
+      </div>`;
+    $("chat").appendChild(msg);
+    $("chat").scrollTop = $("chat").scrollHeight;
+  }
+
+  function copyId() {
+    navigator.clipboard.writeText($("my-id").textContent);
+    alert("ID 已複製");
+  }
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      chunks = [];
+      mediaRecorder = new MediaRecorder(stream);
+      mediaRecorder.ondataavailable = e => chunks.push(e.data);
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        addAudio("me", URL.createObjectURL(blob));
+        blob.arrayBuffer().then(buf => send({ type: "audio", data: buf }));
+      };
+      mediaRecorder.start();
+    } catch (err) {
+      alert("無法錄音：" + err.message);
+    }
+  }
+
+  function stopRecording() {
+    if (mediaRecorder) mediaRecorder.stop();
+  }
+</script>
+
+</body>
+</html>
