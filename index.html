@@ -145,6 +145,9 @@
 
   const $ = id => document.getElementById(id);
 
+  // 預設佔位圖片
+  const defaultAvatar = "https://via.placeholder.com/40";
+
   // 產生隨機6位短ID（小寫英數）
   function randomShortId() {
     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -200,12 +203,24 @@
     });
   }
 
-  createPeer(ROOM_ID);
+  // 取得對應使用者的頭像
+  function getAvatarImg(sender) {
+    if (sender === "me") return localAvatar || defaultAvatar;
+    else return remoteAvatar || defaultAvatar;
+  }
 
   $("avatarInput").addEventListener("change", e => {
+    const file = e.target.files[0];
+    if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => { localAvatar = reader.result; };
-    if (e.target.files[0]) reader.readAsDataURL(e.target.files[0]);
+    reader.onload = () => {
+      localAvatar = reader.result;
+      // 頭像變了後，通知對方（如果有連線）
+      if(conn && conn.open) {
+        send({ type: "avatar", data: localAvatar });
+      }
+    };
+    reader.readAsDataURL(file);
   });
 
   function send(data) {
@@ -224,7 +239,9 @@
     if (data.type === "text") {
       addMessage("you", data.data);
     } else if (data.type === "avatar") {
-      remoteAvatar = data.data;
+      if (data.data) {
+        remoteAvatar = data.data;
+      }
     } else if (data.type === "audio") {
       const blob = new Blob([data.data], { type: 'audio/webm' });
       const url = URL.createObjectURL(blob);
@@ -236,7 +253,7 @@
     const msg = document.createElement("div");
     msg.className = `message ${sender}`;
     msg.innerHTML = `
-      <img src="${sender === 'me' ? localAvatar : remoteAvatar || 'https://via.placeholder.com/40'}" />
+      <img src="${getAvatarImg(sender)}" />
       <div class="bubble">${text}</div>`;
     $("chat").appendChild(msg);
     $("chat").scrollTop = $("chat").scrollHeight;
@@ -246,7 +263,7 @@
     const msg = document.createElement("div");
     msg.className = `message ${sender}`;
     msg.innerHTML = `
-      <img src="${sender === 'me' ? localAvatar : remoteAvatar || 'https://via.placeholder.com/40'}" />
+      <img src="${getAvatarImg(sender)}" />
       <div class="bubble audio-bubble">
         <audio controls src="${url}"></audio>
       </div>`;
@@ -279,177 +296,10 @@
   function stopRecording() {
     if (mediaRecorder) mediaRecorder.stop();
   }
-</script>
 
-</body>
-</html>      background-color: #e04868;
-    }
-    input[type="file"] {
-      background: none;
-    }
-  </style>
-</head>
-<body>
-
-<header>🍑 桃信 Momo Talk</header>
-
-<div class="panel">
-  <label>你的 ID：</label><span id="my-id">產生中...</span>
-  <button onclick="copyId()">複製</button>
-  <label style="margin-left:1em;">頭像：</label><input type="file" id="avatarInput" accept="image/*" />
-</div>
-
-<div class="panel" style="display:none;">
-  <label>對方 ID：</label>
-  <input id="peer-id" placeholder="輸入對方 ID" disabled>
-  <button onclick="connect()" disabled>連線</button>
-  <button onclick="startRecording()">🎙️ 錄音</button>
-  <button onclick="stopRecording()">⏹️ 停止</button>
-</div>
-
-<div id="chat"></div>
-
-<div id="input-area">
-  <input id="msg" placeholder="輸入訊息..." />
-  <button onclick="sendMsg()">傳送</button>
-</div>
-
-<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
-<script>
-  const ROOM_ID = "momo-talk-room"; // 固定房間ID
-
-  let peer, conn = null;
-  let localAvatar = "";
-  let remoteAvatar = "";
-  let mediaRecorder, chunks = [];
-
-  const $ = id => document.getElementById(id);
-
-  // 建立 Peer 並嘗試當房主
-  function createPeer(id) {
-    peer = new Peer(id);
-
-    peer.on('open', id => {
-      $("my-id").textContent = id;
-      if (id !== ROOM_ID) {
-        // 非房主時嘗試連線房主
-        connectRoom();
-      }
-    });
-
-    peer.on('connection', c => {
-      conn = c;
-      setupConnEvents();
-    });
-
-    peer.on('error', err => {
-      if (err.type === 'unavailable-id' && id === ROOM_ID) {
-        // 房主ID被占用，改成隨機ID並嘗試連房主
-        createPeer(null);
-      } else {
-        console.error(err);
-        alert('Peer 連線錯誤: ' + err.type);
-      }
-    });
-  }
-
-  function connectRoom() {
-    conn = peer.connect(ROOM_ID);
-    setupConnEvents();
-  }
-
-  function setupConnEvents() {
-    if (!conn) return;
-    conn.on('open', () => {
-      send({ type: "avatar", data: localAvatar });
-    });
-    conn.on('data', handleData);
-    conn.on('close', () => {
-      addMessage('you', '連線已中斷');
-      conn = null;
-    });
-  }
-
-  peer = null;
+  // 頁面初始化，先用ROOM_ID當房主ID建立Peer
   createPeer(ROOM_ID);
 
-  $("avatarInput").addEventListener("change", e => {
-    const reader = new FileReader();
-    reader.onload = () => { localAvatar = reader.result; };
-    if (e.target.files[0]) reader.readAsDataURL(e.target.files[0]);
-  });
-
-  function send(data) {
-    if (conn && conn.open) conn.send(data);
-  }
-
-  function sendMsg() {
-    const text = $("msg").value.trim();
-    if (!text) return;
-    send({ type: "text", data: text });
-    addMessage("me", text);
-    $("msg").value = "";
-  }
-
-  function handleData(data) {
-    if (data.type === "text") {
-      addMessage("you", data.data);
-    } else if (data.type === "avatar") {
-      remoteAvatar = data.data;
-    } else if (data.type === "audio") {
-      const blob = new Blob([data.data], { type: 'audio/webm' });
-      const url = URL.createObjectURL(blob);
-      addAudio("you", url);
-    }
-  }
-
-  function addMessage(sender, text) {
-    const msg = document.createElement("div");
-    msg.className = `message ${sender}`;
-    msg.innerHTML = `
-      <img src="${sender === 'me' ? localAvatar : remoteAvatar || 'https://via.placeholder.com/40'}" />
-      <div class="bubble">${text}</div>`;
-    $("chat").appendChild(msg);
-    $("chat").scrollTop = $("chat").scrollHeight;
-  }
-
-  function addAudio(sender, url) {
-    const msg = document.createElement("div");
-    msg.className = `message ${sender}`;
-    msg.innerHTML = `
-      <img src="${sender === 'me' ? localAvatar : remoteAvatar || 'https://via.placeholder.com/40'}" />
-      <div class="bubble audio-bubble">
-        <audio controls src="${url}"></audio>
-      </div>`;
-    $("chat").appendChild(msg);
-    $("chat").scrollTop = $("chat").scrollHeight;
-  }
-
-  function copyId() {
-    navigator.clipboard.writeText($("my-id").textContent);
-    alert("ID 已複製");
-  }
-
-  async function startRecording() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      chunks = [];
-      mediaRecorder = new MediaRecorder(stream);
-      mediaRecorder.ondataavailable = e => chunks.push(e.data);
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(chunks, { type: 'audio/webm' });
-        addAudio("me", URL.createObjectURL(blob));
-        blob.arrayBuffer().then(buf => send({ type: "audio", data: buf }));
-      };
-      mediaRecorder.start();
-    } catch (err) {
-      alert("無法錄音：" + err.message);
-    }
-  }
-
-  function stopRecording() {
-    if (mediaRecorder) mediaRecorder.stop();
-  }
 </script>
 
 </body>
