@@ -1,44 +1,41 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-<meta charset="UTF-8" />
-<title>桃信 Momo Talk</title>
+<meta charset="UTF-8">
+<title>桃信 Momo Talk 自動連接</title>
 <style>
-  body { font-family: "Segoe UI","Microsoft JhengHei",sans-serif; margin:0; background:linear-gradient(to bottom,#ffeef3,#ffffff); display:flex; flex-direction:column; height:100vh; }
+  body { font-family:"Segoe UI","Microsoft JhengHei",sans-serif; margin:0; background:linear-gradient(to bottom,#ffeef3,#fff); display:flex; flex-direction:column; height:100vh; }
   header { background:#ff5a7e; color:white; padding:1em; text-align:center; font-weight:bold; font-size:1.3em; letter-spacing:1px; box-shadow:0 2px 4px #e47; }
   .panel { padding:1em; background:#fff; border-radius:12px; margin:1em; box-shadow:0 2px 5px rgba(0,0,0,0.1); }
-  .panel label { font-weight:bold; margin-right:0.5em; }
   #chat { flex:1; padding:1em; overflow-y:auto; background:#fffafc; display:flex; flex-direction:column; }
   .message { display:flex; align-items:flex-start; margin:0.6em 0; }
-  .message img.avatar { width:48px; height:48px; border-radius:50%; border:2px solid #ff8ca5; margin-right:0.5em; object-fit:cover; }
-  .bubble { max-width:70%; padding:0.6em 1em; border-radius:1em; word-break:break-word; box-shadow:0 2px 5px rgba(0,0,0,0.1); position:relative; }
+  .message img { width:48px; height:48px; border-radius:50%; border:2px solid #ff8ca5; margin-right:0.5em; }
+  .bubble { max-width:70%; padding:0.6em 1em; border-radius:1em; word-break:break-word; box-shadow:0 2px 5px rgba(0,0,0,0.1); }
   .me { flex-direction:row-reverse; }
-  .me img.avatar { margin-left:0.5em; margin-right:0; }
+  .me img { margin-left:0.5em; margin-right:0; }
   .me .bubble { background:linear-gradient(to right,#ffbdd3,#ffdce7); margin-left:auto; }
   .you .bubble { background:#f1f1f1; }
   .audio-bubble { display:inline-block; }
   #input-area { display:flex; padding:1em; border-top:1px solid #ccc; background:#fff0f5; }
-  input, button { font-size:1em; }
+  input,button { font-size:1em; }
   #msg { flex:1; padding:0.5em; border-radius:8px; border:1px solid #ccc; }
-  button { padding:0.5em 1em; background-color:#ff5a7e; border:none; border-radius:6px; color:white; cursor:pointer; }
-  button:hover { background-color:#e04868; }
+  button { padding:0.5em 1em; background:#ff5a7e; border:none; border-radius:6px; color:white; cursor:pointer; }
+  button:hover { background:#e04868; }
 </style>
 </head>
 <body>
 
-<header>Momo Talk</header>
+<header>Momo+Talk</header>
 
 <div class="panel">
-  <label>你的 ID：</label><span id="my-id">產生中...</span>
-  <button onclick="copyId()">複製</button>
-  <label style="margin-left:1em;">頭像：</label><input type="file" id="avatarInput" accept="image/*" />
+  <label>我的 ID：</label><span id="my-id">連線中...</span>
+  <label style="margin-left:1em;">頭像：</label><input type="file" id="avatarInput" accept="image/*">
 </div>
 
 <div id="chat"></div>
 
 <div id="input-area">
-  <input id="msg" placeholder="輸入訊息或圖片網址..." />
-  <input type="file" id="imgInput" accept="image/*" style="margin-left:5px;" />
+  <input id="msg" placeholder="輸入訊息或貼上連結/圖片網址...">
   <button onclick="sendMsg()">傳送</button>
   <button onclick="startRecording()">🎙️</button>
   <button onclick="stopRecording()">⏹️</button>
@@ -46,122 +43,107 @@
 
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <script>
+const ROOM_ID = "R3D"; // 固定短ID
 const $ = id => document.getElementById(id);
-let peer, conn, localAvatar = "", remoteAvatar = "", mediaRecorder, chunks = [];
-const urlParams = new URLSearchParams(location.search);
-const targetId = urlParams.get('id');
 
-// 產生短ID
-function shortId() {
-  return Math.random().toString(36).substr(2,5);
-}
+let peer, conn;
+let localAvatar = "", remoteAvatar = "";
+let mediaRecorder, chunks = [];
 
-// 初始化 Peer
-function initPeer(id=null) {
-  peer = new Peer(id || undefined, {
+// 建立Peer
+function initPeer() {
+  peer = new Peer(ROOM_ID, {
     debug: 2,
     config: { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] }
   });
 
-  peer.on('open', pid => {
-    $("my-id").textContent = pid;
-    if (!targetId) {
-      console.log("等待別人用 ?id=" + pid + " 連線");
-    } else {
-      connectTo(targetId);
+  peer.on("open", id => {
+    $("my-id").textContent = id;
+    console.log("Peer已啟動:", id);
+  });
+
+  peer.on("error", err => {
+    console.warn("Peer錯誤:", err);
+    // 如果房間ID被占用，改用隨機ID並連線到ROOM_ID
+    if (err.type === "unavailable-id") {
+      peer = new Peer(null); // 自動生成ID
+      peer.on("open", id => {
+        $("my-id").textContent = id;
+        conn = peer.connect(ROOM_ID);
+        setupConn();
+      });
     }
   });
 
   peer.on("connection", c => {
     conn = c;
     setupConn();
-    conn.on("open", () => {
-      send({ type: "avatar", data: localAvatar });
-    });
-  });
-
-  peer.on('error', err => {
-    console.error(err);
-    alert("PeerJS 錯誤: " + err.type);
   });
 }
 
+// 連線處理
 function setupConn() {
+  conn.on("open", () => {
+    send({ type: "avatar", data: localAvatar });
+    console.log("已連線到", conn.peer);
+  });
   conn.on("data", handleData);
 }
 
-function connectTo(id) {
-  conn = peer.connect(id);
-  setupConn();
-  conn.on("open", () => {
-    send({ type: "avatar", data: localAvatar });
-  });
+// 處理接收資料
+function handleData(data) {
+  if (data.type === "text") {
+    addMessage("you", formatMsg(data.data));
+  } else if (data.type === "avatar") {
+    remoteAvatar = data.data;
+  } else if (data.type === "audio") {
+    const blob = new Blob([data.data], { type: "audio/webm" });
+    addAudio("you", URL.createObjectURL(blob));
+  }
 }
 
+// 傳送資料
 function send(data) {
   if (conn && conn.open) conn.send(data);
 }
 
+// 格式化訊息（支援連結與圖片）
+function formatMsg(text) {
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  return text.replace(urlRegex, url => {
+    if (/\.(jpg|jpeg|png|gif|webp)$/i.test(url)) {
+      return `<br><img src="${url}" style="max-width:200px;border-radius:8px">`;
+    }
+    return `<a href="${url}" target="_blank">${url}</a>`;
+  });
+}
+
+// 傳送文字
 function sendMsg() {
   const text = $("msg").value.trim();
-  const file = $("imgInput").files[0];
-  if (!text && !file) return;
-
-  if (file) {
-    const reader = new FileReader();
-    reader.onload = () => {
-      send({ type: "image", data: reader.result });
-      addImage("me", reader.result);
-    };
-    reader.readAsDataURL(file);
-    $("imgInput").value = "";
-  } else {
-    // 偵測網址轉連結
-    const html = text.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank">$1</a>');
-    send({ type: "text", data: html });
-    addMessage("me", html);
-    $("msg").value = "";
-  }
+  if (!text) return;
+  send({ type: "text", data: text });
+  addMessage("me", formatMsg(text));
+  $("msg").value = "";
 }
 
-function handleData(data) {
-  if (data.type === "text") {
-    addMessage("you", data.data);
-  } else if (data.type === "avatar") {
-    remoteAvatar = data.data;
-  } else if (data.type === "audio") {
-    const blob = new Blob([data.data], { type: 'audio/webm' });
-    addAudio("you", URL.createObjectURL(blob));
-  } else if (data.type === "image") {
-    addImage("you", data.data);
-  }
-}
-
+// 新增訊息
 function addMessage(sender, html) {
   const msg = document.createElement("div");
   msg.className = `message ${sender}`;
   msg.innerHTML = `
-    <img class="avatar" src="${sender === 'me' ? localAvatar : remoteAvatar || 'https://via.placeholder.com/40'}" />
+    <img src="${sender === 'me' ? localAvatar : remoteAvatar || 'https://via.placeholder.com/40'}">
     <div class="bubble">${html}</div>`;
   $("chat").appendChild(msg);
   $("chat").scrollTop = $("chat").scrollHeight;
 }
 
-function addImage(sender, src) {
-  const msg = document.createElement("div");
-  msg.className = `message ${sender}`;
-  msg.innerHTML = `
-    <img class="avatar" src="${sender === 'me' ? localAvatar : remoteAvatar || 'https://via.placeholder.com/40'}" />
-    <div class="bubble"><img src="${src}" style="max-width:200px; border-radius:8px;"></div>`;
-  $("chat").appendChild(msg);
-  $("chat").scrollTop = $("chat").scrollHeight;
-}
-
+// 新增音訊訊息
 function addAudio(sender, url) {
   const msg = document.createElement("div");
   msg.className = `message ${sender}`;
   msg.innerHTML = `
-    <img class="avatar" src="${sender === 'me' ? localAvatar : remoteAvatar || 'https://via.placeholder.com/40'}" />
+    <img src="${sender === 'me' ? localAvatar : remoteAvatar || 'https://via.placeholder.com/40'}">
     <div class="bubble audio-bubble">
       <audio controls src="${url}"></audio>
     </div>`;
@@ -169,17 +151,14 @@ function addAudio(sender, url) {
   $("chat").scrollTop = $("chat").scrollHeight;
 }
 
-function copyId() {
-  navigator.clipboard.writeText($("my-id").textContent);
-  alert("ID 已複製");
-}
-
+// 頭像上傳
 $("avatarInput").addEventListener("change", e => {
   const reader = new FileReader();
   reader.onload = () => { localAvatar = reader.result; };
   if (e.target.files[0]) reader.readAsDataURL(e.target.files[0]);
 });
 
+// 錄音
 async function startRecording() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -187,7 +166,7 @@ async function startRecording() {
     mediaRecorder = new MediaRecorder(stream);
     mediaRecorder.ondataavailable = e => chunks.push(e.data);
     mediaRecorder.onstop = () => {
-      const blob = new Blob(chunks, { type: 'audio/webm' });
+      const blob = new Blob(chunks, { type: "audio/webm" });
       addAudio("me", URL.createObjectURL(blob));
       blob.arrayBuffer().then(buf => send({ type: "audio", data: buf }));
     };
@@ -196,17 +175,9 @@ async function startRecording() {
     alert("無法錄音：" + err.message);
   }
 }
+function stopRecording() { if (mediaRecorder) mediaRecorder.stop(); }
 
-function stopRecording() {
-  if (mediaRecorder) mediaRecorder.stop();
-}
-
-// 啟動
-if (!targetId) {
-  initPeer(shortId());
-} else {
-  initPeer();
-}
+initPeer();
 </script>
 </body>
 </html>
